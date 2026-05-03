@@ -34,7 +34,6 @@ REQUEST_HEADERS = {
 }
 
 PRICE_CSS_SELECTOR = ".price"
-IMAGE_CSS_SELECTOR = "[class*='coles-targeting-StylesProductDetailStylesStyledZoomBtn'] img"
 
 
 def scrape_price(page: Page, url: str) -> tuple[str, float]:
@@ -60,19 +59,18 @@ def scrape_price(page: Page, url: str) -> tuple[str, float]:
 
 
 def scrape_image(page: Page) -> str | None:
-    """Return the src of the first product image on the already-loaded page, or None."""
+    """Return the src of the first <img> on the already-loaded page, or None."""
     try:
-        log.info("Attempting image scrape with selector: %s", IMAGE_CSS_SELECTOR)
-        element = page.query_selector(IMAGE_CSS_SELECTOR)
-        if element is None:
-            log.warning("Image element not found — selector '%s' matched nothing", IMAGE_CSS_SELECTOR)
+        imgs = page.query_selector_all("img")
+        if not imgs:
+            log.warning("No <img> elements found on page")
             return None
-        log.info("Image element found, reading src attributes")
+        element = imgs[0]
         src = element.get_attribute("src") or element.get_attribute("data-src")
         if src:
             log.info("Image src resolved: %s", src.strip())
         else:
-            log.warning("Image element found but both src and data-src are empty")
+            log.warning("First <img> element has no src or data-src")
         return src.strip() if src else None
     except Exception as exc:
         log.warning("Image scrape raised an exception: %s", exc)
