@@ -51,24 +51,51 @@ def fetch_all_items_for_scan(conn: pymysql.Connection) -> list[dict]:
         return cur.fetchall()
 
 
-def fetch_sale_items(conn: pymysql.Connection) -> list[dict]:
-    """Return items where the current price is below target_price or historical average."""
-    sql = """
-        SELECT cm.id, cm.name, cm.url, cm.price, cm.target_price,
-               ph.avg_price
-        FROM coles_monitor cm
-        LEFT JOIN (
-            SELECT item_id, AVG(price) AS avg_price
-            FROM price_history
-            GROUP BY item_id
-        ) ph ON ph.item_id = cm.id
-        WHERE (cm.target_price IS NOT NULL AND cm.price < cm.target_price)
-           OR (ph.avg_price IS NOT NULL AND cm.price < ph.avg_price)
-        ORDER BY cm.name ASC
+# Minimum number of scan data points required before an auto-target is computed.
+AUTO_TARGET_MIN_SCANS = 5
+
+
+def _compute_auto_targets(
+    conn: pymysql.Connection,
+    item_ids: list[int],
+    min_data_points: int = AUTO_TARGET_MIN_SCANS,
+) -> dict[int, float | None]:
+    """Return a dict mapping item_id → 25th-percentile price (or None if too few scans)."""
+    if not item_ids:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(item_ids))
+    sql = f"""
+        SELECT item_id, price
+        FROM price_history
+        WHERE item_id IN ({placeholders})
+        ORDER BY item_id ASC, price ASC
     """
     with conn.cursor() as cur:
-        cur.execute(sql)
-        return cur.fetchall()
+        cur.execute(sql, item_ids)
+        rows = cur.fetchall()
+
+    # Group sorted prices per item
+    grouped: dict[int, list[float]] = {}
+    for row in rows:
+        iid = row["item_id"]
+        grouped.setdefault(iid, []).append(float(row["price"]))
+
+    result: dict[int, float | None] = {}
+    for iid in item_ids:
+        prices = grouped.get(iid, [])
+        if len(prices) < min_data_points:
+            result[iid] = None
+        else:
+            idx = int(0.25 * len(prices))
+            result[iid] = prices[idx]
+    return result
+
+
+def fetch_sale_items(conn: pymysql.Connection) -> list[dict]:
+    """Return items where the current price qualifies as a sale (below effective target or avg)."""
+    all_items = fetch_all_items(conn)
+    return [item for item in all_items if item.get("badge_below_target") or item.get("badge_below_avg")]
 
 
 def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
@@ -118,10 +145,13 @@ def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
             recent[iid] = []
         recent[iid].append(float(row["price"]))
 
+    auto_targets = _compute_auto_targets(conn, item_ids)
+
     for item in items:
         prices = recent.get(item["id"], [])
         item["latest_price"] = prices[0] if len(prices) >= 1 else None
         item["prev_price"] = prices[1] if len(prices) >= 2 else None
+        item["auto_target"] = auto_targets.get(item["id"])
         _attach_badges(item)
 
     return items
@@ -130,14 +160,20 @@ def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
 def _attach_badges(row: dict) -> None:
     """Attach boolean badge flags and is_pending to an item dict (mutates in place)."""
     price = float(row["price"] or 0)
-    target = float(row["target_price"]) if row.get("target_price") else None
+    manual_target = float(row["target_price"]) if row.get("target_price") else None
+    auto_target = float(row["auto_target"]) if row.get("auto_target") is not None else None
     avg = float(row["avg_price"]) if row.get("avg_price") else None
     latest = row.get("latest_price")
     prev = row.get("prev_price")
 
+    # Manual target takes precedence; fall back to auto-computed 25th-percentile target.
+    effective_target = manual_target if manual_target is not None else auto_target
+
     row["badge_dropped"] = latest is not None and prev is not None and latest < prev
-    row["badge_below_target"] = target is not None and price < target
+    row["badge_below_target"] = effective_target is not None and price < effective_target
     row["badge_below_avg"] = avg is not None and price < avg
+    # Lets the template know whether the target shown is auto-computed vs manual.
+    row["badge_using_auto_target"] = manual_target is None and auto_target is not None
 
     updated_at = row.get("updated_at")
     if updated_at is None:
@@ -176,6 +212,10 @@ def fetch_item_by_id(conn: pymysql.Connection, item_id: int) -> dict | None:
 
     row["latest_price"] = float(recent[0]["price"]) if len(recent) >= 1 else None
     row["prev_price"] = float(recent[1]["price"]) if len(recent) >= 2 else None
+
+    auto_targets = _compute_auto_targets(conn, [item_id])
+    row["auto_target"] = auto_targets.get(item_id)
+
     _attach_badges(row)
     return row
 

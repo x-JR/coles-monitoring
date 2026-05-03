@@ -57,8 +57,12 @@
       <td>
         {% if item.target_price %}
           {{ item.target_price | money }}
+          <span class="badge bg-secondary fw-normal ms-1" style="font-size:.6rem">manual</span>
+        {% elif item.auto_target %}
+          {{ item.auto_target | money }}
+          <span class="badge bg-primary fw-normal ms-1" style="font-size:.6rem">auto</span>
         {% else %}
-          <span class="text-muted">—</span>
+          <span class="text-muted small">collecting…</span>
         {% endif %}
       </td>
       <td>

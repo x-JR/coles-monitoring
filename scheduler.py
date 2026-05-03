@@ -11,49 +11,39 @@ log = logging.getLogger(__name__)
 _scheduler = BackgroundScheduler()
 
 
-def _hourly_scan_job() -> None:
-    log.info("Scheduled hourly scan starting.")
+def _daily_scan_and_summary_job() -> None:
+    log.info("Daily scan starting.")
     conn = db.get_connection()
     try:
-        items = db.fetch_items(conn)
+        items = db.fetch_all_items_for_scan(conn)
     finally:
         conn.close()
     scanner.run_scan_for_items(items)
-    log.info("Scheduled hourly scan complete.")
+    log.info("Daily scan complete. Fetching sale items for summary.")
 
-
-def _daily_summary_job() -> None:
-    log.info("Daily summary job starting.")
     conn = db.get_connection()
     try:
-        items = db.fetch_sale_items(conn)
+        sale_items = db.fetch_sale_items(conn)
     finally:
         conn.close()
-    if items:
-        discord_notify.send_discord_daily_summary(items)
-        log.info("Daily summary sent for %d item(s).", len(items))
+    if sale_items:
+        discord_notify.send_discord_daily_summary(sale_items)
+        log.info("Daily summary sent for %d item(s).", len(sale_items))
     else:
         log.info("No sale items found; skipping daily summary.")
 
 
 def start_scheduler() -> None:
     _scheduler.add_job(
-        _hourly_scan_job,
-        "interval",
-        hours=1,
-        id="hourly_scan",
-        replace_existing=True,
-    )
-    _scheduler.add_job(
-        _daily_summary_job,
+        _daily_scan_and_summary_job,
         "cron",
         hour=8,
         minute=0,
-        id="daily_summary",
+        id="daily_scan_and_summary",
         replace_existing=True,
     )
     _scheduler.start()
-    log.info("APScheduler started (hourly scan job registered).")
+    log.info("APScheduler started (daily scan + summary job registered at 08:00).")
 
 
 def stop_scheduler() -> None:
