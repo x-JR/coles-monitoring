@@ -1,0 +1,10 @@
+requests
+PyMySQL
+python-dotenv
+playwright
+playwright-stealth
+fastapi
+uvicorn[standard]
+apscheduler
+jinja2
+python-multipart

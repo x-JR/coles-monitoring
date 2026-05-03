@@ -1,0 +1,38 @@
+name: Docker Image CI
+
+# This action runs only when you push code to the 'main' branch
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checks out your repository's code so the workflow can access it
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Logs you into Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 3. This clever action automatically creates good tags for your image
+      #    It will create a 'latest' tag and a tag with the git commit SHA
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ultimatedl/coles-monitoring
+
+      # 4. Builds the Docker image from your Dockerfile and pushes it to Docker Hub
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true # This tells the action to push after building
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
