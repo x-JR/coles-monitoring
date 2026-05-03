@@ -151,13 +151,6 @@ def run_scan_for_items(items: list[dict]) -> None:
                         raw_price,
                     )
 
-                    # Only alert on a genuine price drop (not on first scan where stored=0.00)
-                    if stored_price > 0 and current_price < stored_price:
-                        try:
-                            discord_notify.send_discord_price_drop(item, current_price)
-                        except Exception as dn_exc:
-                            log.error("Discord price-drop notification failed: %s", dn_exc)
-
                     db.record_price_history(conn, item["id"], current_price, raw_price)
                     db.update_item(conn, item["id"], current_price)
 

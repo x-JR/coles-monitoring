@@ -3,6 +3,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import db
+import discord_notify
 import scanner
 
 log = logging.getLogger(__name__)
@@ -21,12 +22,34 @@ def _hourly_scan_job() -> None:
     log.info("Scheduled hourly scan complete.")
 
 
+def _daily_summary_job() -> None:
+    log.info("Daily summary job starting.")
+    conn = db.get_connection()
+    try:
+        items = db.fetch_sale_items(conn)
+    finally:
+        conn.close()
+    if items:
+        discord_notify.send_discord_daily_summary(items)
+        log.info("Daily summary sent for %d item(s).", len(items))
+    else:
+        log.info("No sale items found; skipping daily summary.")
+
+
 def start_scheduler() -> None:
     _scheduler.add_job(
         _hourly_scan_job,
         "interval",
         hours=1,
         id="hourly_scan",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _daily_summary_job,
+        "cron",
+        hour=8,
+        minute=0,
+        id="daily_summary",
         replace_existing=True,
     )
     _scheduler.start()

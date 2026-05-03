@@ -51,6 +51,26 @@ def fetch_all_items_for_scan(conn: pymysql.Connection) -> list[dict]:
         return cur.fetchall()
 
 
+def fetch_sale_items(conn: pymysql.Connection) -> list[dict]:
+    """Return items where the current price is below target_price or historical average."""
+    sql = """
+        SELECT cm.id, cm.name, cm.url, cm.price, cm.target_price,
+               ph.avg_price
+        FROM coles_monitor cm
+        LEFT JOIN (
+            SELECT item_id, AVG(price) AS avg_price
+            FROM price_history
+            GROUP BY item_id
+        ) ph ON ph.item_id = cm.id
+        WHERE (cm.target_price IS NOT NULL AND cm.price < cm.target_price)
+           OR (ph.avg_price IS NOT NULL AND cm.price < ph.avg_price)
+        ORDER BY cm.name ASC
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return cur.fetchall()
+
+
 def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
     """Return all tracked items with avg price and scan count for dashboard display."""
     sql = """
