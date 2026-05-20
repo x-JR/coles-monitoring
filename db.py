@@ -103,10 +103,11 @@ def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
     sql = """
         SELECT cm.*,
                COALESCE(ph.avg_price, cm.price) AS avg_price,
+               COALESCE(ph.min_price, cm.price) AS min_price,
                COALESCE(ph.scan_count, 0)       AS scan_count
         FROM coles_monitor cm
         LEFT JOIN (
-            SELECT item_id, AVG(price) AS avg_price, COUNT(*) AS scan_count
+            SELECT item_id, AVG(price) AS avg_price, MIN(price) AS min_price, COUNT(*) AS scan_count
             FROM price_history
             GROUP BY item_id
         ) ph ON ph.item_id = cm.id
@@ -154,6 +155,14 @@ def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
         item["auto_target"] = auto_targets.get(item["id"])
         _attach_badges(item)
 
+    # Items with any active badge float to the top; alphabetical within each group.
+    items.sort(
+        key=lambda i: (
+            not (i["badge_dropped"] or i["badge_below_target"] or i["badge_below_avg"]),
+            (i["name"] or "").lower(),
+        )
+    )
+
     return items
 
 
@@ -168,10 +177,17 @@ def _attach_badges(row: dict) -> None:
 
     # Manual target takes precedence; fall back to auto-computed 25th-percentile target.
     effective_target = manual_target if manual_target is not None else auto_target
+    min_p = float(row["min_price"]) if row.get("min_price") is not None else None
+    scan_count = int(row.get("scan_count") or 0)
 
-    row["badge_dropped"] = latest is not None and prev is not None and latest < prev
+    row["badge_lowest_price"] = min_p is not None and scan_count > 0 and price <= min_p
+    row["badge_below_avg"] = avg is not None and price <= avg
+    row["badge_dropped"] = (
+        (latest is not None and prev is not None and latest < prev)
+        or row["badge_lowest_price"]
+        or row["badge_below_avg"]
+    )
     row["badge_below_target"] = effective_target is not None and price < effective_target
-    row["badge_below_avg"] = avg is not None and price < avg
     # Lets the template know whether the target shown is auto-computed vs manual.
     row["badge_using_auto_target"] = manual_target is None and auto_target is not None
 
@@ -193,13 +209,14 @@ def fetch_item_by_id(conn: pymysql.Connection, item_id: int) -> dict | None:
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT AVG(price) AS avg_price, COUNT(*) AS scan_count "
+            "SELECT AVG(price) AS avg_price, MIN(price) AS min_price, COUNT(*) AS scan_count "
             "FROM price_history WHERE item_id = %s",
             (item_id,),
         )
         stats = cur.fetchone()
 
     row["avg_price"] = stats["avg_price"]
+    row["min_price"] = stats["min_price"]
     row["scan_count"] = int(stats["scan_count"] or 0)
 
     with conn.cursor() as cur:

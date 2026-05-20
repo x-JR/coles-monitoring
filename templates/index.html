@@ -28,7 +28,7 @@
         <th>Name</th>
         <th>Current Price</th>
         <th>Target Price</th>
-        <th>Avg Price</th>
+        <th>Lowest Price</th>
         <th>Last Scanned</th>
         <th>Status</th>
       </tr>
@@ -67,7 +67,7 @@
       </td>
       <td>
         {% if item.scan_count > 0 %}
-          {{ item.avg_price | money }}
+          {{ item.min_price | money }}
         {% else %}
           <span class="text-muted">—</span>
         {% endif %}
@@ -83,16 +83,15 @@
         {% if item.is_pending %}
           <span class="badge bg-secondary">Pending</span>
         {% else %}
-          {% if item.badge_dropped %}
+          {% if item.badge_lowest_price %}
+            <span class="badge bg-success me-1">Lowest Price</span>
+          {% elif item.badge_below_avg %}
+            <span class="badge bg-info text-dark me-1">Special</span>
+          {% elif item.badge_dropped %}
             <span class="badge bg-success me-1">Price Dropped</span>
-          {% endif %}
-          {% if item.badge_below_target %}
+          {% elif item.badge_below_target %}
             <span class="badge bg-warning text-dark me-1">Below Target</span>
-          {% endif %}
-          {% if item.badge_below_avg %}
-            <span class="badge bg-info text-dark me-1">Below Average</span>
-          {% endif %}
-          {% if not item.badge_dropped and not item.badge_below_target and not item.badge_below_avg %}
+          {% else %}
             <span class="badge bg-light text-secondary border">Normal</span>
           {% endif %}
         {% endif %}

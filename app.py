@@ -141,8 +141,8 @@ def add_item(
 
     if not name:
         errors.append("Name is required.")
-    if not url.startswith("http"):
-        errors.append("URL must start with http:// or https://.")
+    if not url.startswith("https://www.coles.com.au/"):
+        errors.append("URL must be a Coles product URL starting with https://www.coles.com.au/.")
 
     target: float | None = None
     if target_price.strip():
