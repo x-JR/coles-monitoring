@@ -186,7 +186,9 @@ def _attach_badges(row: dict) -> None:
     # meaning it's a genuine low rather than a product that has never changed price.
     price_has_varied = min_p is not None and max_p is not None and max_p > min_p
     row["badge_lowest_price"] = price_has_varied and scan_count > 0 and price <= min_p
-    row["badge_below_avg"] = avg is not None and price <= avg
+    # Use strict less-than so a product whose price has never changed (price == avg) doesn't
+    # falsely appear as "Below Average".
+    row["badge_below_avg"] = avg is not None and price_has_varied and price < avg
     row["badge_dropped"] = (
         (latest is not None and prev is not None and latest < prev)
         or row["badge_lowest_price"]
