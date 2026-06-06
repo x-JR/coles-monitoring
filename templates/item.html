@@ -89,7 +89,15 @@
 <!-- Price history chart -->
 {% if history %}
 <div class="card shadow-sm">
-  <div class="card-header fw-semibold">Price History</div>
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span class="fw-semibold">Price History</span>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Time range">
+      <button type="button" class="btn btn-outline-secondary period-btn" data-days="7">Week</button>
+      <button type="button" class="btn btn-outline-secondary period-btn" data-days="30">Month</button>
+      <button type="button" class="btn btn-outline-secondary period-btn" data-days="365">Year</button>
+      <button type="button" class="btn btn-outline-secondary period-btn active" data-days="0">All Time</button>
+    </div>
+  </div>
   <div class="card-body">
     <canvas id="priceChart"></canvas>
   </div>
@@ -105,24 +113,36 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
 (function () {
-  const priceHistory = JSON.parse(document.getElementById('price-data').textContent);
-  const labels = priceHistory.map(function(h) {
-    const d = new Date(h.scanned_at);
-    return d.toLocaleString('en-AU', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-  });
-  const prices = priceHistory.map(function(h) { return h.price; });
+  const allHistory = JSON.parse(document.getElementById('price-data').textContent);
+
+  function buildDataset(days) {
+    let filtered = allHistory;
+    if (days > 0) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      filtered = allHistory.filter(function(h) { return new Date(h.scanned_at) >= cutoff; });
+    }
+    return {
+      labels: filtered.map(function(h) {
+        const d = new Date(h.scanned_at);
+        return d.toLocaleString('en-AU', {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+      }),
+      prices: filtered.map(function(h) { return h.price; })
+    };
+  }
 
   const ctx = document.getElementById('priceChart').getContext('2d');
-  new Chart(ctx, {
+  const initial = buildDataset(0);
+  const chart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: labels,
+      labels: initial.labels,
       datasets: [{
         label: 'Price ($)',
-        data: prices,
+        data: initial.prices,
         borderColor: '#198754',
         backgroundColor: 'rgba(25, 135, 84, 0.08)',
         tension: 0.2,
@@ -153,6 +173,18 @@
         }
       }
     }
+  });
+
+  document.querySelectorAll('.period-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      const days = parseInt(btn.dataset.days, 10);
+      const ds = buildDataset(days);
+      chart.data.labels = ds.labels;
+      chart.data.datasets[0].data = ds.prices;
+      chart.update();
+    });
   });
 }());
 </script>

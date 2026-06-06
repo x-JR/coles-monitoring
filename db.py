@@ -104,10 +104,11 @@ def fetch_all_items(conn: pymysql.Connection) -> list[dict]:
         SELECT cm.*,
                COALESCE(ph.avg_price, cm.price) AS avg_price,
                COALESCE(ph.min_price, cm.price) AS min_price,
+               COALESCE(ph.max_price, cm.price) AS max_price,
                COALESCE(ph.scan_count, 0)       AS scan_count
         FROM coles_monitor cm
         LEFT JOIN (
-            SELECT item_id, AVG(price) AS avg_price, MIN(price) AS min_price, COUNT(*) AS scan_count
+            SELECT item_id, AVG(price) AS avg_price, MIN(price) AS min_price, MAX(price) AS max_price, COUNT(*) AS scan_count
             FROM price_history
             GROUP BY item_id
         ) ph ON ph.item_id = cm.id
@@ -178,9 +179,13 @@ def _attach_badges(row: dict) -> None:
     # Manual target takes precedence; fall back to auto-computed 25th-percentile target.
     effective_target = manual_target if manual_target is not None else auto_target
     min_p = float(row["min_price"]) if row.get("min_price") is not None else None
+    max_p = float(row["max_price"]) if row.get("max_price") is not None else None
     scan_count = int(row.get("scan_count") or 0)
 
-    row["badge_lowest_price"] = min_p is not None and scan_count > 0 and price <= min_p
+    # Only award "Lowest Price" if the product has actually been at a higher price before,
+    # meaning it's a genuine low rather than a product that has never changed price.
+    price_has_varied = min_p is not None and max_p is not None and max_p > min_p
+    row["badge_lowest_price"] = price_has_varied and scan_count > 0 and price <= min_p
     row["badge_below_avg"] = avg is not None and price <= avg
     row["badge_dropped"] = (
         (latest is not None and prev is not None and latest < prev)
