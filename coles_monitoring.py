@@ -50,6 +50,7 @@ REQUEST_HEADERS = {
 }
 
 PRICE_CSS_SELECTOR = ".price"
+UNAVAILABLE_CSS_SELECTOR = ".coles-targeting-ProductBuyCurrentlyUnavailableMessage"
 
 # ---------------------------------------------------------------------------
 # Database helpers
@@ -122,6 +123,15 @@ def record_price_history(
 
 
 # ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class ProductUnavailableError(RuntimeError):
+    """Raised when the product page shows a 'temporarily unavailable' message."""
+
+
+# ---------------------------------------------------------------------------
 # Scraping
 # ---------------------------------------------------------------------------
 
@@ -134,14 +144,20 @@ def scrape_price(page: Page, url: str) -> tuple[str, float]:
     Raises RuntimeError if the price cannot be found or parsed.
     """
     page.goto(url, timeout=30000, wait_until="domcontentloaded")
-    # Wait for the price element to appear after JS renders
-    page.wait_for_selector(PRICE_CSS_SELECTOR, timeout=15000)
+    # Wait for either the price element or the unavailable message to appear
+    page.wait_for_selector(
+        f"{PRICE_CSS_SELECTOR}, {UNAVAILABLE_CSS_SELECTOR}", timeout=15000
+    )
+
+    if page.query_selector(UNAVAILABLE_CSS_SELECTOR) is not None:
+        raise ProductUnavailableError("Product is temporarily unavailable")
 
     element = page.query_selector(PRICE_CSS_SELECTOR)
     if element is None:
         raise RuntimeError(f"Price element '{PRICE_CSS_SELECTOR}' not found on page")
 
     raw_text = (element.inner_text() or "").strip()
+
     match = re.search(r"[\d.]+", raw_text)
     if match is None:
         raise RuntimeError(f"Could not parse a number from price text: {raw_text!r}")
@@ -224,6 +240,11 @@ def main() -> None:
                 log.info("Processing: %s — %s", item["name"], item["url"])
                 try:
                     raw_price, current_price = scrape_price(page, item["url"])
+                except ProductUnavailableError as exc:
+                    log.warning("'%s' is temporarily unavailable, skipping Discord alert.", item["name"])
+                    record_price_history(conn, item["id"], float(item["price"]), "UNAVAILABLE")
+                    update_item(conn, item["id"], float(item["price"]), item.get("last_recorded_price") or "")
+                    continue
                 except Exception as exc:
                     log.error("Scrape failed for '%s': %s", item["name"], exc)
                     try:
