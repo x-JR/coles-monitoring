@@ -73,10 +73,6 @@ playwright install chromium
 uvicorn app:app --reload
 ```
 
-## CI / CD
-
-Pushing to `main` triggers the GitHub Actions workflow (`.github/workflows/docker-image.yml`) which builds and pushes the Docker image to Docker Hub under `ultimatedl/coles-monitoring`.
-
 ## Project structure
 
 ```
@@ -88,7 +84,7 @@ discord_notify.py    Discord webhook helpers
 templates/           Jinja2 HTML templates
 static/
   style.css
-  images/            Downloaded product images (git-ignored)
+  images/            Downloaded product images
 init.sql             Database schema
 Dockerfile
 docker-compose.yml
