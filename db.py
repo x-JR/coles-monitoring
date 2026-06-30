@@ -283,6 +283,27 @@ def update_item_image(
     conn.commit()
 
 
+def mark_item_unavailable(conn: pymysql.Connection, item_id: int) -> None:
+    """Flag an item as unavailable (price selector not found) and bump updated_at."""
+    sql = """
+        UPDATE coles_monitor
+        SET    unavailable = 1,
+               updated_at  = NOW()
+        WHERE  id = %s
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (item_id,))
+    conn.commit()
+
+
+def mark_item_available(conn: pymysql.Connection, item_id: int) -> None:
+    """Clear the unavailable flag when a scan succeeds."""
+    sql = "UPDATE coles_monitor SET unavailable = 0 WHERE id = %s"
+    with conn.cursor() as cur:
+        cur.execute(sql, (item_id,))
+    conn.commit()
+
+
 def record_price_history(
     conn: pymysql.Connection,
     item_id: int,

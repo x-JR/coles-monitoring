@@ -80,7 +80,9 @@
         {% endif %}
       </td>
       <td>
-        {% if item.is_pending %}
+        {% if item.unavailable %}
+          <span class="badge bg-danger">Unavailable</span>
+        {% elif item.is_pending %}
           <span class="badge bg-secondary">Pending</span>
         {% else %}
           {% if item.badge_lowest_price %}

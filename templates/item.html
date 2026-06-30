@@ -23,7 +23,10 @@
     </div>
   </div>
   <div class="text-end">
-    {% if item.is_pending %}
+    {% if item.unavailable %}
+      <div class="h2 fw-bold text-danger">Unavailable</div>
+      <div class="text-muted small">Last known: {{ item.price | money }}</div>
+    {% elif item.is_pending %}
       <div class="h2 text-muted">Pending first scan…</div>
     {% else %}
       <div class="h2 fw-bold text-success">{{ item.price | money }}</div>
@@ -75,6 +78,9 @@
 
 <!-- Badges -->
 <div class="mb-4">
+  {% if item.unavailable %}
+    <span class="badge bg-danger me-1">Unavailable</span>
+  {% endif %}
   {% if item.badge_dropped %}
     <span class="badge bg-success me-1">Price Dropped</span>
   {% endif %}

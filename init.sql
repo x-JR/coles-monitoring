@@ -7,6 +7,8 @@
 --   ALTER TABLE coles_monitor ADD COLUMN path TEXT DEFAULT NULL
 --       COMMENT 'Product image URL scraped on first scan';
 --   ALTER TABLE coles_monitor DROP COLUMN last_recorded_price;
+--   ALTER TABLE coles_monitor ADD COLUMN unavailable TINYINT(1) NOT NULL DEFAULT 0
+--       COMMENT 'Set to 1 when price selector is not found during a scan';
 
 CREATE TABLE IF NOT EXISTS coles_monitor (
     id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -15,6 +17,7 @@ CREATE TABLE IF NOT EXISTS coles_monitor (
     price        DECIMAL(10, 2) NOT NULL           COMMENT 'Last known price (updated every scan)',
     target_price DECIMAL(10, 2) DEFAULT NULL       COMMENT 'Optional alert threshold; badge shown when price drops below this',
     path         TEXT           DEFAULT NULL       COMMENT 'Product image URL scraped on first scan',
+    unavailable  TINYINT(1)     NOT NULL DEFAULT 0  COMMENT 'Set to 1 when price selector is not found during a scan',
     updated_at   DATETIME       NOT NULL
                      DEFAULT '2000-01-01 00:00:00' COMMENT 'Set to old date so new rows are scanned immediately'
 );

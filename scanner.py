@@ -7,7 +7,7 @@ import time
 
 import requests
 from dotenv import load_dotenv
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 from playwright_stealth import Stealth
 
 import db
@@ -16,6 +16,11 @@ import discord_notify
 load_dotenv()
 
 log = logging.getLogger(__name__)
+
+
+class ProductUnavailableError(Exception):
+    """Raised when the price selector cannot be found, indicating the product may be unavailable."""
+
 
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -39,11 +44,16 @@ PRICE_CSS_SELECTOR = ".price"
 def scrape_price(page: Page, url: str) -> tuple[str, float]:
     """Navigate to url and return (raw_text, float_price). Raises RuntimeError on failure."""
     page.goto(url, timeout=30_000, wait_until="domcontentloaded")
-    page.wait_for_selector(PRICE_CSS_SELECTOR, timeout=15_000)
+    try:
+        page.wait_for_selector(PRICE_CSS_SELECTOR, timeout=15_000)
+    except PlaywrightTimeoutError:
+        raise ProductUnavailableError(
+            f"Price selector '{PRICE_CSS_SELECTOR}' not found after 15 s — product may be unavailable"
+        )
 
     element = page.query_selector(PRICE_CSS_SELECTOR)
     if element is None:
-        raise RuntimeError(f"Price element '{PRICE_CSS_SELECTOR}' not found on page")
+        raise ProductUnavailableError(f"Price element '{PRICE_CSS_SELECTOR}' not found on page")
 
     raw_text = (element.inner_text() or "").strip()
     match = re.search(r"[\d.]+", raw_text)
@@ -132,6 +142,9 @@ def run_scan_for_items(items: list[dict]) -> None:
                 log.info("Scanning: %s — %s", item["name"], item["url"])
                 try:
                     raw_price, current_price = scrape_price(page, item["url"])
+                except ProductUnavailableError as exc:
+                    log.warning("Product '%s' appears unavailable: %s", item["name"], exc)
+                    db.mark_item_unavailable(conn, item["id"])
                 except Exception as exc:
                     log.error("Scrape failed for '%s': %s", item["name"], exc)
                     try:
@@ -140,6 +153,7 @@ def run_scan_for_items(items: list[dict]) -> None:
                         log.error("Discord failure notification failed: %s", dn_exc)
                     db.update_item(conn, item["id"], float(item["price"]))
                 else:
+                    db.mark_item_available(conn, item["id"])
                     stored_price = float(item["price"])
                     log.info(
                         "'%s': stored=%.2f  current=%.2f  raw=%r",
