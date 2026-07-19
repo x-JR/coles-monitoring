@@ -20,6 +20,8 @@
     "mysql2": "latest",
     "node-cron": "latest",
     "playwright": "latest",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "latest",
     "react-dom": "latest",
     "recharts": "latest",

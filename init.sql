@@ -9,6 +9,10 @@
 --   ALTER TABLE coles_monitor DROP COLUMN last_recorded_price;
 --   ALTER TABLE coles_monitor ADD COLUMN unavailable TINYINT(1) NOT NULL DEFAULT 0
 --       COMMENT 'Set to 1 when price selector is not found during a scan';
+--   ALTER TABLE coles_monitor ADD COLUMN owner_visitor_id CHAR(36) DEFAULT NULL
+--       COMMENT 'Browser visitor id that created this row; NULL rows are shared but not user-manageable';
+--   ALTER TABLE coles_monitor ADD COLUMN auto_pricing_enabled TINYINT(1) NOT NULL DEFAULT 1
+--       COMMENT 'Set to 0 to ignore computed auto target pricing for this item';
 
 CREATE TABLE IF NOT EXISTS coles_monitor (
     id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -16,7 +20,9 @@ CREATE TABLE IF NOT EXISTS coles_monitor (
     url          TEXT           NOT NULL,
     price        DECIMAL(10, 2) NOT NULL           COMMENT 'Last known price (updated every scan)',
     target_price DECIMAL(10, 2) DEFAULT NULL       COMMENT 'Optional alert threshold; badge shown when price drops below this',
+    auto_pricing_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Set to 0 to ignore computed auto target pricing for this item',
     path         TEXT           DEFAULT NULL       COMMENT 'Product image URL scraped on first scan',
+    owner_visitor_id CHAR(36)   DEFAULT NULL       COMMENT 'Browser visitor id that created this row; NULL rows are shared but not user-manageable',
     unavailable  TINYINT(1)     NOT NULL DEFAULT 0  COMMENT 'Set to 1 when price selector is not found during a scan',
     updated_at   DATETIME       NOT NULL
                      DEFAULT '2000-01-01 00:00:00' COMMENT 'Set to old date so new rows are scanned immediately'

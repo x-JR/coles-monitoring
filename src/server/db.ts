@@ -1,6 +1,6 @@
 import mysql from "mysql2/promise";
 import "dotenv/config";
-import type { ItemRow, PriceHistoryRow } from "./types";
+import type { ItemRow, PriceHistoryRow, SalePrediction } from "./types";
 
 const batchSize = Number(process.env.BATCH_SIZE ?? 2);
 const autoTargetMinScans = 5;
@@ -28,6 +28,77 @@ export const pool = mysql.createPool({
 const toNumber = (value: unknown): number => Number(value ?? 0);
 const optionalNumber = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
+let autoPricingColumnReady = false;
+
+const salePredictionMinScans = 10;
+const aestOffsetMs = 10 * 60 * 60 * 1000;
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function roundDays(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function daysBetween(start: Date, end: Date): number {
+  return (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function snapForwardToWednesday(date: Date): Date {
+  const wednesday = 3;
+  const aestDay = new Date(date.getTime() + aestOffsetMs).getUTCDay();
+  const daysUntilWednesday = (wednesday - aestDay + 7) % 7;
+  return addDays(date, daysUntilWednesday);
+}
+
+function emptySalePrediction(status: SalePrediction["status"]): SalePrediction {
+  return {
+    status,
+    sale_threshold: null,
+    typical_sale_price: null,
+    typical_regular_price: null,
+    cycle_days: null,
+    sale_duration_days: null,
+    next_sale_start: null,
+    next_sale_end: null,
+    confidence: null,
+    observed_sale_windows: 0,
+    interval_days: [],
+    current_sale: false,
+    days_until_next_sale: null
+  };
+}
+
+export async function loadSchemaCapabilities(): Promise<void> {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS column_count
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'coles_monitor'
+       AND COLUMN_NAME = 'auto_pricing_enabled'`
+  );
+  const [{ column_count: columnCount }] = rows as Array<{ column_count: number }>;
+  autoPricingColumnReady = Number(columnCount) > 0;
+  if (!autoPricingColumnReady) {
+    console.warn("auto_pricing_enabled column is missing; run the init.sql migration to enable admin auto pricing toggles.");
+  }
+}
+
+export function canPersistAutoPricingSetting(): boolean {
+  return autoPricingColumnReady;
+}
 
 export async function fetchItemsForScheduler(): Promise<ItemRow[]> {
   const [rows] = await pool.execute(
@@ -88,17 +159,19 @@ function attachBadges(item: ItemRow): ItemRow {
   const price = toNumber(item.price);
   const manualTarget = optionalNumber(item.target_price);
   const autoTarget = optionalNumber(item.auto_target);
+  const autoPricingEnabled = item.auto_pricing_enabled === undefined ? true : Boolean(item.auto_pricing_enabled);
   const average = optionalNumber(item.avg_price);
   const minimum = optionalNumber(item.min_price);
   const maximum = optionalNumber(item.max_price);
   const latest = optionalNumber(item.latest_price);
   const previous = optionalNumber(item.prev_price);
   const scanCount = Number(item.scan_count ?? 0);
-  const effectiveTarget = manualTarget ?? autoTarget;
+  const effectiveTarget = manualTarget ?? (autoPricingEnabled ? autoTarget : null);
   const priceHasVaried = minimum !== null && maximum !== null && maximum > minimum;
 
   item.price = price;
   item.target_price = manualTarget;
+  item.auto_pricing_enabled = autoPricingEnabled;
   item.avg_price = average;
   item.min_price = minimum;
   item.max_price = maximum;
@@ -114,7 +187,7 @@ function attachBadges(item: ItemRow): ItemRow {
     item.badge_lowest_price ||
     item.badge_below_avg;
   item.badge_below_target = effectiveTarget !== null && price < effectiveTarget;
-  item.badge_using_auto_target = manualTarget === null && autoTarget !== null;
+  item.badge_using_auto_target = manualTarget === null && autoPricingEnabled && autoTarget !== null;
 
   const updatedAt = item.updated_at;
   item.is_pending =
@@ -127,8 +200,12 @@ function attachBadges(item: ItemRow): ItemRow {
 }
 
 export async function fetchAllItems(): Promise<ItemRow[]> {
+  const autoPricingSelection = autoPricingColumnReady
+    ? "cm.auto_pricing_enabled,"
+    : "1 AS auto_pricing_enabled,";
   const [rows] = await pool.execute(
     `SELECT cm.*,
+            ${autoPricingSelection}
             COALESCE(ph.avg_price, cm.price) AS avg_price,
             COALESCE(ph.min_price, cm.price) AS min_price,
             COALESCE(ph.max_price, cm.price) AS max_price,
@@ -193,7 +270,10 @@ export async function fetchSaleItems(): Promise<ItemRow[]> {
 }
 
 export async function fetchItemById(itemId: number): Promise<ItemRow | null> {
-  const [rows] = await pool.execute("SELECT * FROM coles_monitor WHERE id = ?", [itemId]);
+  const autoPricingSelection = autoPricingColumnReady
+    ? "auto_pricing_enabled"
+    : "1 AS auto_pricing_enabled";
+  const [rows] = await pool.execute(`SELECT *, ${autoPricingSelection} FROM coles_monitor WHERE id = ?`, [itemId]);
   const item = (rows as ItemRow[])[0];
   if (!item) {
     return null;
@@ -222,13 +302,52 @@ export async function fetchItemById(itemId: number): Promise<ItemRow | null> {
   return attachBadges(item);
 }
 
-export async function addItem(name: string, url: string, targetPrice: number | null): Promise<number> {
+export function attachManagePermission(item: ItemRow, visitorId: string): ItemRow {
+  item.can_manage = item.owner_visitor_id === visitorId;
+  delete item.owner_visitor_id;
+  return item;
+}
+
+export async function addItem(
+  name: string,
+  url: string,
+  targetPrice: number | null,
+  ownerVisitorId: string
+): Promise<number> {
   const [result] = await pool.execute(
-    `INSERT INTO coles_monitor (name, url, price, target_price, path)
-     VALUES (?, ?, 0.00, ?, NULL)`,
-    [name, url, targetPrice]
+    `INSERT INTO coles_monitor (name, url, price, target_price, path, owner_visitor_id)
+     VALUES (?, ?, 0.00, ?, NULL, ?)`,
+    [name, url, targetPrice, ownerVisitorId]
   );
   return Number((result as mysql.ResultSetHeader).insertId);
+}
+
+export async function deleteItemForVisitor(itemId: number, visitorId: string): Promise<boolean> {
+  const [result] = await pool.execute(
+    "DELETE FROM coles_monitor WHERE id = ? AND owner_visitor_id = ?",
+    [itemId, visitorId]
+  );
+  return (result as mysql.ResultSetHeader).affectedRows > 0;
+}
+
+export async function deleteItem(itemId: number): Promise<boolean> {
+  const [result] = await pool.execute("DELETE FROM coles_monitor WHERE id = ?", [itemId]);
+  return (result as mysql.ResultSetHeader).affectedRows > 0;
+}
+
+export async function updateAdminItemDetails(
+  itemId: number,
+  name: string,
+  autoPricingEnabled: boolean
+): Promise<void> {
+  if (!autoPricingColumnReady) {
+    await pool.execute("UPDATE coles_monitor SET name = ? WHERE id = ?", [name, itemId]);
+    return;
+  }
+  await pool.execute(
+    `UPDATE coles_monitor SET name = ?, auto_pricing_enabled = ? WHERE id = ?`,
+    [name, autoPricingEnabled ? 1 : 0, itemId]
+  );
 }
 
 export async function updateItem(itemId: number, price: number): Promise<void> {
@@ -278,4 +397,109 @@ export async function fetchPriceHistoryForItem(itemId: number): Promise<PriceHis
     raw_price: row.raw_price,
     scanned_at: row.scanned_at instanceof Date ? row.scanned_at.toISOString() : String(row.scanned_at)
   }));
+}
+
+export function predictSaleCycle(history: PriceHistoryRow[], now = new Date()): SalePrediction {
+  const points = history
+    .map((point) => ({ price: Number(point.price), scannedAt: new Date(point.scanned_at) }))
+    .filter((point) => Number.isFinite(point.price) && !Number.isNaN(point.scannedAt.getTime()))
+    .sort((a, b) => a.scannedAt.getTime() - b.scannedAt.getTime());
+
+  if (points.length < salePredictionMinScans) {
+    return emptySalePrediction("insufficient_history");
+  }
+
+  const prices = points.map((point) => point.price);
+  const sortedPrices = [...prices].sort((a, b) => a - b);
+  const minimum = sortedPrices[0];
+  const maximum = sortedPrices[sortedPrices.length - 1];
+  const priceRange = maximum - minimum;
+  if (priceRange < 0.1) {
+    return emptySalePrediction("no_cycle");
+  }
+
+  const uniquePrices = [...new Set(sortedPrices.map(roundMoney))];
+  let saleThreshold = minimum + priceRange * 0.35;
+  if (uniquePrices.length >= 3) {
+    let largestGap = 0;
+    let lowerGapPrice = uniquePrices[0];
+    for (let index = 1; index < uniquePrices.length; index += 1) {
+      const gap = uniquePrices[index] - uniquePrices[index - 1];
+      if (gap > largestGap) {
+        largestGap = gap;
+        lowerGapPrice = uniquePrices[index - 1];
+      }
+    }
+    if (largestGap >= Math.max(0.2, priceRange * 0.25)) {
+      saleThreshold = lowerGapPrice + largestGap / 2;
+    }
+  }
+  saleThreshold = Math.min(saleThreshold, maximum - priceRange * 0.1);
+
+  const scanGaps = points.slice(1).map((point, index) => daysBetween(points[index].scannedAt, point.scannedAt));
+  const scanCadenceDays = Math.max(1, median(scanGaps.filter((gap) => gap > 0)) ?? 1);
+  const windows: Array<{ start: Date; end: Date; prices: number[] }> = [];
+  for (const point of points) {
+    if (point.price > saleThreshold) continue;
+
+    const currentWindow = windows[windows.length - 1];
+    if (currentWindow && daysBetween(currentWindow.end, point.scannedAt) <= scanCadenceDays * 1.75) {
+      currentWindow.end = point.scannedAt;
+      currentWindow.prices.push(point.price);
+    } else {
+      windows.push({ start: point.scannedAt, end: point.scannedAt, prices: [point.price] });
+    }
+  }
+
+  const salePrices = windows.flatMap((window) => window.prices);
+  const regularPrices = prices.filter((price) => price > saleThreshold);
+  const typicalSalePrice = median(salePrices);
+  const typicalRegularPrice = median(regularPrices);
+  const basePrediction: Pick<SalePrediction, "sale_threshold" | "typical_sale_price" | "typical_regular_price" | "observed_sale_windows" | "current_sale"> = {
+    sale_threshold: roundMoney(saleThreshold),
+    typical_sale_price: typicalSalePrice === null ? null : roundMoney(typicalSalePrice),
+    typical_regular_price: typicalRegularPrice === null ? roundMoney(maximum) : roundMoney(typicalRegularPrice),
+    observed_sale_windows: windows.length,
+    current_sale: points[points.length - 1].price <= saleThreshold
+  };
+
+  if (windows.length < 3) {
+    return { ...emptySalePrediction("no_cycle"), ...basePrediction };
+  }
+
+  const intervals = windows.slice(1).map((window, index) => daysBetween(windows[index].start, window.start));
+  const cycleDays = median(intervals);
+  if (cycleDays === null || cycleDays < scanCadenceDays * 1.5) {
+    return { ...emptySalePrediction("no_cycle"), ...basePrediction, interval_days: intervals.map(roundDays) };
+  }
+
+  const averageDeviation = intervals.reduce((total, interval) => total + Math.abs(interval - cycleDays), 0) / intervals.length;
+  const tolerance = Math.max(scanCadenceDays * 2, cycleDays * 0.35);
+  if (averageDeviation > tolerance) {
+    return { ...emptySalePrediction("no_cycle"), ...basePrediction, interval_days: intervals.map(roundDays) };
+  }
+
+  const windowDurations = windows.map((window) => Math.max(scanCadenceDays, daysBetween(window.start, window.end) + scanCadenceDays));
+  const saleDurationDays = median(windowDurations) ?? scanCadenceDays;
+  let nextSaleStart = addDays(windows[windows.length - 1].start, cycleDays);
+  while (nextSaleStart < now) {
+    nextSaleStart = addDays(nextSaleStart, cycleDays);
+  }
+  nextSaleStart = snapForwardToWednesday(nextSaleStart);
+  const nextSaleEnd = addDays(nextSaleStart, saleDurationDays);
+  const consistency = 1 - averageDeviation / tolerance;
+  const confidence: SalePrediction["confidence"] =
+    windows.length >= 5 && consistency >= 0.7 ? "high" : windows.length >= 4 && consistency >= 0.45 ? "medium" : "low";
+
+  return {
+    status: "predictable",
+    ...basePrediction,
+    cycle_days: roundDays(cycleDays),
+    sale_duration_days: roundDays(saleDurationDays),
+    next_sale_start: nextSaleStart.toISOString(),
+    next_sale_end: nextSaleEnd.toISOString(),
+    confidence,
+    interval_days: intervals.map(roundDays),
+    days_until_next_sale: Math.max(0, Math.round(daysBetween(now, nextSaleStart)))
+  };
 }

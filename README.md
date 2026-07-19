@@ -6,9 +6,13 @@ A self-hosted web app that tracks product prices on [Coles](https://www.coles.co
 
 - Dashboard showing all tracked items with current price, badges, and thumbnails
 - **On Sale** page with three filter modes: Price Dropped, Below Target, Below Average
+- Admin page for editing item names, toggling auto pricing, and deleting any tracked item when the current visitor ID matches the configured admin visitor ID
 - Per-item price history graph
 - Add new items via the web UI — triggers an immediate scrape
-- Manual **Sync All** button to kick off a full scan on demand
+- Visitor cookies mark which browser added each item, so users can delete only their own additions
+- Visitor ID control for moving a browser identity between devices
+- Light/dark mode toggle remembered in a cookie
+- Admin-only manual **Sync All** button to kick off a full scan on demand
 - Daily background scanner with random inter-item delays to reduce detection
 - Product images downloaded and served locally
 - Discord webhook notifications on price drops or scrape failures
@@ -51,8 +55,11 @@ DB_USER=your-db-user
 DB_PASSWORD=your-db-password
 DB_NAME=your-db-name
 BATCH_SIZE=5
+ADMIN_VISITOR_ID=your-admin-visitor-uuid
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
+
+The admin page is only shown when the current browser visitor ID matches `ADMIN_VISITOR_ID`. Use the visitor ID control in the top navigation to copy your generated ID into `.env`, or to move that admin identity to another browser.
 
 ### 3. Run with Docker Compose
 
