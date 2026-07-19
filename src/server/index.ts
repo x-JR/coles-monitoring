@@ -271,6 +271,27 @@ app.patch("/api/admin/items/:itemId", requireAdmin, async (request, response, ne
   }
 });
 
+app.post("/api/admin/items/:itemId/rescan", requireAdmin, async (request, response, next) => {
+  try {
+    const itemId = Number(request.params.itemId);
+    if (!Number.isInteger(itemId) || itemId <= 0) {
+      response.status(400).json({ error: "Invalid item id." });
+      return;
+    }
+
+    const item = await db.fetchItemById(itemId);
+    if (!item) {
+      response.status(404).json({ error: "Item not found." });
+      return;
+    }
+
+    triggerItemScan(itemId);
+    response.status(202).json({ scanning: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/sync-all", requireAdmin, (_request, response) => {
   triggerFullScan();
   response.status(202).json({ syncing: true });

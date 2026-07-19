@@ -145,7 +145,7 @@ a { color: inherit; }
 .visitor-popover p { margin: 0; color: var(--red); font-weight: 700; }
 :root[data-theme="dark"] .visitor-popover input { background: #111812; }
 .page { width: min(1180px, calc(100% - 32px)); margin: 36px auto 64px; }
-.hero-panel, .panel, .table-wrap, .product-card, .stat, .toolbar, .empty, .error-box {
+.hero-panel, .panel, .table-wrap, .product-card, .stat, .toolbar, .empty, .error-box, .success-box {
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(23, 33, 27, 0.1);
   box-shadow: var(--shadow);
@@ -157,7 +157,8 @@ a { color: inherit; }
 :root[data-theme="dark"] .stat,
 :root[data-theme="dark"] .toolbar,
 :root[data-theme="dark"] .empty,
-:root[data-theme="dark"] .error-box {
+:root[data-theme="dark"] .error-box,
+:root[data-theme="dark"] .success-box {
   background: rgba(24, 35, 27, 0.86);
   border-color: rgba(237, 245, 238, 0.1);
 }
@@ -233,8 +234,9 @@ tbody tr:hover { background: #f4faf5; }
 :root[data-theme="dark"] .badge-blue { background: #123743; color: #a3e7f2; }
 :root[data-theme="dark"] .badge-red { background: #44201b; color: #ffb2a7; }
 :root[data-theme="dark"] .badge-gray { background: #27322b; color: #b5c2ba; }
-.empty, .error-box { padding: 22px; border-radius: 8px; color: var(--muted); }
+.empty, .error-box, .success-box { padding: 22px; border-radius: 8px; color: var(--muted); }
 .error-box { color: var(--red); }
+.success-box { color: var(--green-dark); }
 .form-page { max-width: 680px; margin: 0 auto; }
 .form { display: grid; gap: 18px; padding: 24px; border-radius: 8px; margin-top: 18px; }
 .form label { display: grid; gap: 8px; font-weight: 800; color: var(--ink); }

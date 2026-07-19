@@ -486,7 +486,9 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [rescanningId, setRescanningId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editAutoPricingEnabled, setEditAutoPricingEnabled] = useState(true);
 
@@ -512,6 +514,7 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
     if (!window.confirm(`Delete ${item.name}?`)) return;
     setDeletingId(item.id);
     setError(null);
+    setNotice(null);
     const response = await fetch(`/api/admin/items/${item.id}`, { method: "DELETE" });
     setDeletingId(null);
     if (!response.ok) {
@@ -527,6 +530,7 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
     setEditName(item.name);
     setEditAutoPricingEnabled(item.auto_pricing_enabled);
     setError(null);
+    setNotice(null);
   }
 
   function stopEditing() {
@@ -538,6 +542,7 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
   async function saveItem(item: Item) {
     setSavingId(item.id);
     setError(null);
+    setNotice(null);
     const response = await fetch(`/api/admin/items/${item.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -553,6 +558,20 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
     stopEditing();
   }
 
+  async function rescanItem(item: Item) {
+    setRescanningId(item.id);
+    setError(null);
+    setNotice(null);
+    const response = await fetch(`/api/admin/items/${item.id}/rescan`, { method: "POST" });
+    setRescanningId(null);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error ?? "Unable to queue item rescan.");
+      return;
+    }
+    setNotice(`Queued rescan for ${item.name}.`);
+  }
+
   return (
     <section>
       <div className="section-head">
@@ -560,6 +579,7 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
       </div>
 
       {error ? <div className="error-box admin-message">{error}</div> : null}
+      {notice ? <div className="success-box admin-message">{notice}</div> : null}
       {loading ? <div className="empty admin-message">Loading admin items...</div> : null}
       {!loading && !error && items.length === 0 ? <div className="empty admin-message">No tracked items found.</div> : null}
 
@@ -617,6 +637,9 @@ function Admin({ navigate }: { navigate: (href: string) => void }) {
                           <Pencil size={16} /> Edit
                         </button>
                       )}
+                      <button className="button ghost" onClick={() => rescanItem(item)} disabled={rescanningId === item.id || deletingId === item.id || savingId === item.id}>
+                        <RefreshCw size={16} className={rescanningId === item.id ? "spin" : undefined} /> {rescanningId === item.id ? "Queueing..." : "Rescan"}
+                      </button>
                       <button className="button danger" onClick={() => deleteItem(item)} disabled={deletingId === item.id || savingId === item.id}>
                         <Trash2 size={16} /> {deletingId === item.id ? "Deleting..." : "Delete"}
                       </button>
