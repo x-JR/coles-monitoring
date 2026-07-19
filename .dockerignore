@@ -1,8 +1,10 @@
 .venv/
 __pycache__/
-*.pyc
-*.pyo
 .env
 .git/
 .gitignore
-static/images/
+dist/
+node_modules/
+npm-debug.log*
+static/images/*
+!static/images/.gitkeep

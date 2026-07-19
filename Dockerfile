@@ -1,16 +1,18 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Download Chromium and install its OS-level dependencies
-RUN playwright install chromium \
-    && playwright install-deps chromium
+COPY package*.json ./
+RUN npm ci
 
 COPY . .
 
+RUN npm run build \
+    && npm prune --omit=dev
+
+ENV NODE_ENV=production
+ENV PORT=8000
+
 EXPOSE 8000
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["npm", "start"]

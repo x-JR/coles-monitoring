@@ -6,20 +6,21 @@ A self-hosted web app that tracks product prices on [Coles](https://www.coles.co
 
 - Dashboard showing all tracked items with current price, badges, and thumbnails
 - **On Sale** page with three filter modes: Price Dropped, Below Target, Below Average
-- Per-item price history graph (Chart.js)
+- Per-item price history graph
 - Add new items via the web UI — triggers an immediate scrape
 - Manual **Sync All** button to kick off a full scan on demand
-- Hourly background scanner (APScheduler) with random inter-item delays to reduce detection
+- Daily background scanner with random inter-item delays to reduce detection
 - Product images downloaded and served locally
 - Discord webhook notifications on price drops or scrape failures
 
 ## Stack
 
-- **FastAPI** + Jinja2 templates + Bootstrap 5
+- **React** + **Vite** + TypeScript for the web UI
+- **Express** + TypeScript for API routes
+- **mysql2** for MySQL / MariaDB access
 - **Playwright** (Chromium, headless) for scraping
-- **APScheduler** for the background scan schedule
-- **MySQL / MariaDB** for item and price history storage
-- Docker + Docker Compose for deployment
+- **node-cron** for the background scan schedule
+- **Recharts** for price history graphs
 
 ## Requirements
 
@@ -63,27 +64,31 @@ The app is available at `http://localhost:8000`.
 
 Product images are persisted to `./static/images/` on the host via a bind mount and survive container rebuilds.
 
-### 4. Run locally (development)
+### 4. Run locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-uvicorn app:app --reload
+npm install
+npm run playwright:install
+npm run dev
 ```
+
+The React app runs at `http://localhost:5173` and proxies API requests to the Express server at `http://localhost:8000`.
+
+Build and serve the TypeScript app:
+
+```bash
+npm run build
+npm start
+```
+
+The production server is available at `http://localhost:8000`.
 
 ## Project structure
 
 ```
-app.py               FastAPI application, routes, lifespan
-db.py                Database helpers
-scanner.py           Playwright scraping logic
-scheduler.py         APScheduler setup
-discord_notify.py    Discord webhook helpers
-templates/           Jinja2 HTML templates
+src/server/          TypeScript Express API, DB, scanner, scheduler, Discord helpers
+src/client/          React/Vite frontend
 static/
-  style.css
   images/            Downloaded product images
 init.sql             Database schema
 Dockerfile
