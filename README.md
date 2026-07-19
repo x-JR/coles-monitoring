@@ -57,6 +57,10 @@ DB_NAME=your-db-name
 BATCH_SIZE=5
 ADMIN_VISITOR_ID=your-admin-visitor-uuid
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+# Set to 1 only if this app sits behind a trusted reverse proxy (nginx, Caddy, Cloudflare
+# Tunnel, etc.) that sets X-Forwarded-* headers. Needed for correct rate limiting/secure
+# cookies in that setup. Leave unset otherwise.
+TRUST_PROXY=
 ```
 
 The admin page is only shown when the current browser visitor ID matches `ADMIN_VISITOR_ID`. Use the visitor ID control in the top navigation to copy your generated ID into `.env`, or to move that admin identity to another browser.

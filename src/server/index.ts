@@ -2,6 +2,8 @@ import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import "dotenv/config";
 import * as db from "./db";
 import { startScheduler, triggerFullScan, triggerItemScan } from "./scheduler";
@@ -14,6 +16,30 @@ const app = express();
 const visitorCookieName = "coles_monitor_visitor_id";
 const visitorCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 const visitorIdPattern = /^[a-f0-9-]{36}$/i;
+
+// Only trust X-Forwarded-* headers (used for client IP / https detection) when explicitly
+// running behind a known reverse proxy. Blindly trusting them would let clients spoof their
+// IP and bypass the rate limiters below.
+if (process.env.TRUST_PROXY === "1") {
+  app.set("trust proxy", 1);
+}
+
+// Broad safety net for all API traffic.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Tighter limit for endpoints that write to the DB or trigger a Playwright scrape.
+const mutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." }
+});
 
 declare global {
   namespace Express {
@@ -79,16 +105,18 @@ function requireAdmin(request: express.Request, response: express.Response, next
   next();
 }
 
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(ensureVisitorId);
+app.use("/api", apiLimiter);
 app.use("/static", express.static(path.join(process.cwd(), "static")));
 
 app.get("/api/visitor", (request, response) => {
   response.json({ visitor_id: request.visitorId, is_admin: isAdminVisitor(request.visitorId) });
 });
 
-app.put("/api/visitor", (request, response) => {
+app.put("/api/visitor", mutationLimiter, (request, response) => {
   const visitorId = String(request.body.visitor_id ?? "").trim();
   if (!visitorIdPattern.test(visitorId)) {
     response.status(422).json({ error: "Visitor ID must be a UUID." });
@@ -142,7 +170,7 @@ app.get("/api/items/:itemId", async (request, response, next) => {
   }
 });
 
-app.post("/api/items", async (request, response, next) => {
+app.post("/api/items", mutationLimiter, async (request, response, next) => {
   try {
     const name = String(request.body.name ?? "").trim();
     const url = String(request.body.url ?? "").trim();
@@ -311,7 +339,13 @@ if (process.env.NODE_ENV === "production") {
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   console.error(error);
-  response.status(500).json({ error: error instanceof Error ? error.message : "Unexpected server error" });
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "Unexpected server error"
+      : error instanceof Error
+        ? error.message
+        : "Unexpected server error";
+  response.status(500).json({ error: message });
 });
 
 await db.loadSchemaCapabilities();
