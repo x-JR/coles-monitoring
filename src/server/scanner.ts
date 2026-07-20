@@ -13,18 +13,23 @@ class ProductUnavailableError extends Error {}
 
 type ScrapedPrice = { rawPrice: string; currentPrice: number; imageUrl: string | null };
 
+const chromeVersion = "126.0.0.0";
+
 const requestHeaders = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`,
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.5",
+  "Accept-Language": "en-AU,en;q=0.9,en-US;q=0.8",
   "Accept-Encoding": "gzip, deflate, br",
   Connection: "keep-alive",
   "Upgrade-Insecure-Requests": "1",
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
   "Sec-Fetch-Site": "none",
-  "Sec-Fetch-User": "?1"
+  "Sec-Fetch-User": "?1",
+  "sec-ch-ua": `"Chromium";v="126", "Not.A/Brand";v="24", "Google Chrome";v="126"`,
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"'
 };
 
 const priceSelector = ".price";
@@ -305,7 +310,27 @@ async function scrapePrice(page: Page, url: string): Promise<ScrapedPrice> {
     if (error instanceof errors.TimeoutError) {
       const bodyText = await page.locator("body").innerText().catch(() => "");
       if (/Pardon Our Interruption/i.test(bodyText)) {
-        throw new Error("Coles bot protection page loaded before the product price could be read");
+        console.warn("Coles bot protection page detected; waiting and retrying once.");
+        await delay(45_000 + Math.random() * 30_000);
+        await page.goto(url, { timeout: 30_000, waitUntil: "domcontentloaded" });
+        try {
+          await page.waitForSelector(priceSelector, { timeout: 15_000 });
+        } catch (retryError) {
+          const retryBodyText = await page.locator("body").innerText().catch(() => "");
+          if (/Pardon Our Interruption/i.test(retryBodyText)) {
+            throw new Error("Coles bot protection page loaded before the product price could be read");
+          }
+          throw new ProductUnavailableError(
+            `Price selector '${priceSelector}' not found after 15 seconds; product may be unavailable`
+          );
+        }
+        const rawText = ((await page.locator(priceSelector).first().innerText()) ?? "").trim();
+        const match = rawText.match(/[\d.]+/);
+        if (!match) {
+          throw new Error(`Could not parse a number from price text: ${rawText}`);
+        }
+        const rawPrice = rawText.replace(/Save\s*\$?[\d.]+.*$/i, "").replace("$", "").trim();
+        return { rawPrice, currentPrice: Number(match[0]), imageUrl: null };
       }
       throw new ProductUnavailableError(
         `Price selector '${priceSelector}' not found after 15 seconds; product may be unavailable`
@@ -370,13 +395,16 @@ export async function runScanForItems(items: ItemRow[]): Promise<void> {
     return;
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--disable-blink-features=AutomationControlled"]
+  });
   try {
     const context = await browser.newContext({
       userAgent: requestHeaders["User-Agent"],
-      extraHTTPHeaders: Object.fromEntries(
-        Object.entries(requestHeaders).filter(([key]) => key !== "User-Agent")
-      )
+      locale: "en-AU",
+      timezoneId: "Australia/Brisbane",
+      viewport: { width: 1366, height: 768 }
     });
     const page = await context.newPage();
 
