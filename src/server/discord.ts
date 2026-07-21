@@ -20,13 +20,23 @@ async function postEmbed(embed: Record<string, unknown>): Promise<void> {
   }
 }
 
+const dashboardUrl = "https://coles.tekkie.com.au";
+
 export async function sendDiscordDailySummary(items: ItemRow[]): Promise<void> {
   if (items.length === 0) {
     return;
   }
 
-  const lines = items.map((item) => {
+  const blocks = items.map((item) => {
     const price = Number(item.price);
+    const highest = item.max_price ? Number(item.max_price) : null;
+    const discountPct = highest && highest > price ? Math.round((1 - price / highest) * 100) : null;
+
+    const priceLine =
+      discountPct !== null
+        ? `**$${price.toFixed(2)}** ~~$${highest!.toFixed(2)}~~ · 🔻 **${discountPct}% off** highest`
+        : `**$${price.toFixed(2)}**`;
+
     const reasons: string[] = [];
     if (item.target_price && price < Number(item.target_price)) {
       reasons.push(`below target $${Number(item.target_price).toFixed(2)}`);
@@ -35,23 +45,29 @@ export async function sendDiscordDailySummary(items: ItemRow[]): Promise<void> {
       reasons.push(`below avg $${Number(item.avg_price).toFixed(2)}`);
     }
     const reason = reasons.length > 0 ? reasons.join(", ") : "on sale";
-    return `[${item.name}](${item.url}) - **$${price.toFixed(2)}** (${reason})`;
+
+    return `**[${item.name}](${item.url})**\n${priceLine}\n_${reason}_`;
   });
 
   await postEmbed({
-    author: { name: "Coles Monitoring" },
-    title: "Daily Sale Summary",
-    description: lines.join("\n"),
-    color: 0x1bb513
+    author: { name: "Coles Monitoring", url: dashboardUrl },
+    title: "🛒 Daily Sale Summary",
+    url: dashboardUrl,
+    description: blocks.join("\n\n"),
+    color: 0x1bb513,
+    footer: { text: "coles.tekkie.com.au" },
+    timestamp: new Date().toISOString()
   });
 }
 
 export async function sendDiscordFailure(item: ItemRow, error: string): Promise<void> {
   await postEmbed({
-    author: { name: "Coles Monitoring" },
-    title: `Failure: Coles Scan - ${item.name}`,
+    author: { name: "Coles Monitoring", url: dashboardUrl },
+    title: `⚠️ Failure: Coles Scan - ${item.name}`,
     url: item.url,
     description: error,
-    color: 0xff0000
+    color: 0xff0000,
+    footer: { text: "coles.tekkie.com.au" },
+    timestamp: new Date().toISOString()
   });
 }
